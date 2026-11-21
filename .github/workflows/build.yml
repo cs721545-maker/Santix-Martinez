@@ -1,9 +1,8 @@
 name: Construir Santix Martinez
 
 on:
-  workflow_dispatch:
   push:
-    branches: [principal]
+  workflow_dispatch:
 
 jobs:
   construir:
@@ -21,12 +20,11 @@ jobs:
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          python -m pip install numpy sounddevice PySide6 pyinstaller
 
       - name: Gerar aplicativo Windows
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name "Santix Martinez" --collect-all PySide6 --collect-all shiboken6 --collect-all sounddevice app.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name "Santix Martinez" --collect-all numpy --collect-all sounddevice --collect-all PySide6 --collect-all shiboken6 app.py
 
       - name: Enviar executavel
         uses: actions/upload-artifact@v4
