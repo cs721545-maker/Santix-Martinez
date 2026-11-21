@@ -1,21 +1,36 @@
-name: Build Santix Martinez
+name: Construir Santix Martinez
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [principal]
 
 jobs:
-  build:
+  construir:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - run: pip install pyinstaller
-      - run: pyinstaller --noconfirm --onefile --windowed --name "Santix Martinez" app.py
-      - uses: actions/upload-artifact@v4
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Gerar aplicativo Windows
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name "Santix Martinez" --collect-all PySide6 --collect-all shiboken6 --collect-all sounddevice app.py
+
+      - name: Enviar executavel
+        uses: actions/upload-artifact@v4
         with:
           name: Santix-Martinez-Windows
-          path: dist/Santix Martinez.exe
+          path: "dist/Santix Martinez.exe"
+          
