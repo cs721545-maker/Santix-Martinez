@@ -1,158 +1,316 @@
+
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox
 from pathlib import Path
-import shutil
 from datetime import datetime
+import shutil
+import re
 
-APP_NAME = "Santix Martinez"
 
-class SantixApp:
+class SantixMartinez:
     def __init__(self, root):
         self.root = root
-        root.title(APP_NAME + " - Pro Audio Control")
-        root.geometry("980x650")
-        root.minsize(780, 540)
+        self.root.title("Santix Martinez")
+        self.root.geometry("680x650")
+        self.root.minsize(540, 480)
+        self.root.configure(bg="#10131c")
+
         self.config_path = None
-        self.original_text = None
-        self.enabled = True
-        self.bg = "#101114"
-        self.panel = "#191b20"
-        self.red = "#e5484d"
-        root.configure(bg=self.bg)
 
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TButton", font=("Segoe UI", 10), padding=9)
-        style.configure("TLabel", background=self.bg, foreground="#eeeeee", font=("Segoe UI", 10))
-        style.configure("TFrame", background=self.bg)
+        tk.Label(
+            root, text="𝐒antix 𝐌artinez",
+            font=("Segoe UI", 25, "bold"),
+            fg="#62d9ff", bg="#10131c"
+        ).pack(pady=(20, 5))
 
-        header = tk.Frame(root, bg=self.bg)
-        header.pack(fill="x", padx=24, pady=(20,12))
-        tk.Label(header, text="𝐒antix 𝐌artinez", bg=self.bg, fg=self.red,
-                 font=("Segoe UI", 25, "bold")).pack(anchor="w")
-        tk.Label(header, text="PRO AUDIO CONTROL PANEL  •  WINDOWS",
-                 bg=self.bg, fg="#969ba5", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(3,0))
+        tk.Label(
+            root, text="AUDIO CONTROL PANEL",
+            font=("Segoe UI", 10),
+            fg="#aab4c8", bg="#10131c"
+        ).pack()
 
-        body = tk.Frame(root, bg=self.bg)
-        body.pack(fill="both", expand=True, padx=24, pady=8)
-        nav = tk.Frame(body, bg=self.panel, width=190)
-        nav.pack(side="left", fill="y", padx=(0,16))
-        nav.pack_propagate(False)
-        tk.Label(nav, text="MENU", bg=self.panel, fg="#8e929b",
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16, pady=(18,10))
-        for name in ["Home", "Audio", "VST Hook", "Custom FX", "Settings"]:
-            tk.Button(nav, text="  "+name, anchor="w", relief="flat", bd=0,
-                      bg=self.panel, fg="#eeeeee", activebackground="#292c33",
-                      activeforeground="white", font=("Segoe UI", 11),
-                      command=lambda n=name: self.show_section(n)).pack(fill="x", padx=8, pady=2, ipady=8)
+        self.path_label = tk.Label(
+            root, text="Nenhum arquivo selecionado",
+            fg="white", bg="#202737",
+            wraplength=600, padx=12, pady=12
+        )
+        self.path_label.pack(fill="x", padx=22, pady=18)
 
-        self.content = tk.Frame(body, bg=self.bg)
-        self.content.pack(side="left", fill="both", expand=True)
-        self.show_section("Home")
+        tk.Button(
+            root, text="SELECIONAR CONFIG.TXT",
+            command=self.select_file,
+            bg="#168ac4", fg="white",
+            font=("Segoe UI", 11, "bold"),
+            relief="flat", padx=15, pady=10
+        ).pack()
 
-        footer = tk.Frame(root, bg=self.bg)
-        footer.pack(fill="x", padx=24, pady=(5,18))
-        self.status = tk.Label(footer, text="Nenhum arquivo do Equalizer APO selecionado",
-                               bg=self.bg, fg="#aeb3bd", font=("Segoe UI", 9))
-        self.status.pack(side="left")
+        self.status = tk.Label(
+            root, text="Aguardando arquivo",
+            fg="#f5c96a", bg="#10131c"
+        )
+        self.status.pack(pady=12)
 
-    def card(self, parent, title, value, subtitle=""):
-        f=tk.Frame(parent,bg=self.panel, padx=16,pady=14)
-        tk.Label(f,text=title,bg=self.panel,fg="#aeb3bd",font=("Segoe UI",9,"bold")).pack(anchor="w")
-        tk.Label(f,text=value,bg=self.panel,fg="#ffffff",font=("Segoe UI",18,"bold")).pack(anchor="w",pady=(7,2))
-        if subtitle: tk.Label(f,text=subtitle,bg=self.panel,fg="#8e929b",font=("Segoe UI",9)).pack(anchor="w")
-        return f
+        self.global_button = tk.Button(
+            root, text="ON / OFF GERAL",
+            command=self.toggle_all,
+            bg="#303b50", fg="white",
+            font=("Segoe UI", 12, "bold"),
+            relief="flat", padx=20, pady=12,
+            state="disabled"
+        )
+        self.global_button.pack(pady=8)
 
-    def clear(self):
-        for w in self.content.winfo_children(): w.destroy()
+        tk.Label(
+            root, text="CONTROLES INDIVIDUAIS DOS VST",
+            fg="#62d9ff", bg="#10131c",
+            font=("Segoe UI", 12, "bold")
+        ).pack(pady=(20, 10))
 
-    def show_section(self, section):
-        self.clear()
-        tk.Label(self.content,text=section,bg=self.bg,fg="white",
-                 font=("Segoe UI",20,"bold")).pack(anchor="w",pady=(5,18))
-        if section == "Home":
-            row=tk.Frame(self.content,bg=self.bg); row.pack(fill="x")
-            self.card(row,"ENGINE","Equalizer APO","Integração por arquivo de configuração").pack(side="left",fill="x",expand=True,padx=(0,8))
-            self.card(row,"STATUS","READY" if self.config_path else "SETUP","Selecione seu config.txt").pack(side="left",fill="x",expand=True,padx=8)
-            self.card(row,"VST","DETECT","Plugins identificados no arquivo").pack(side="left",fill="x",expand=True,padx=(8,0))
-            tk.Label(self.content,text="Controle principal",bg=self.bg,fg="#c6c9d0",
-                     font=("Segoe UI",12,"bold")).pack(anchor="w",pady=(28,10))
-            self.toggle_btn=tk.Button(self.content,text="EFEITOS: ON",command=self.toggle,
-                bg=self.red,fg="white",activebackground="#bd3439",relief="flat",
-                font=("Segoe UI",13,"bold"),padx=24,pady=13)
-            self.toggle_btn.pack(anchor="w")
-            ttk.Button(self.content,text="Selecionar config.txt do Equalizer APO",command=self.choose_config).pack(anchor="w",pady=(22,8))
-            ttk.Button(self.content,text="Verificar plugins VST",command=self.show_vsts).pack(anchor="w")
-            tk.Label(self.content,text="A primeira alteração cria uma cópia de segurança ao lado do config.txt.",
-                     bg=self.bg,fg="#969ba5",font=("Segoe UI",9)).pack(anchor="w",pady=20)
-        elif section in ("Audio","VST Hook","Custom FX"):
-            tk.Label(self.content,text="Este módulo será habilitado nas próximas etapas de integração.",
-                     bg=self.bg,fg="#c6c9d0",font=("Segoe UI",11)).pack(anchor="w")
-            if section=="VST Hook": self.show_vsts()
-            if section=="Audio":
-                tk.Label(self.content,text="O painel ainda não lê o nível de áudio em tempo real. Isso exige integração com a API de áudio do Windows.",
-                         bg=self.bg,fg="#969ba5",wraplength=650,justify="left").pack(anchor="w",pady=15)
-        else:
-            ttk.Button(self.content,text="Selecionar config.txt",command=self.choose_config).pack(anchor="w")
-            tk.Label(self.content,text="O arquivo original será preservado por backup antes de qualquer alteração.",
-                     bg=self.bg,fg="#969ba5").pack(anchor="w",pady=12)
+        self.plugins_frame = tk.Frame(root, bg="#10131c")
+        self.plugins_frame.pack(fill="both", expand=True, padx=30)
 
-    def choose_config(self):
-        p=filedialog.askopenfilename(title="Selecione o config.txt do Equalizer APO",
-             filetypes=[("Arquivo de configuração","*.txt"),("Todos os arquivos","*.*")])
-        if not p: return
-        self.config_path=Path(p)
+        tk.Label(
+            root,
+            text="Backup automático antes de cada alteração",
+            fg="#8994a9", bg="#10131c",
+            font=("Segoe UI", 9)
+        ).pack(pady=12)
+
+    def read_lines(self):
+        return self.config_path.read_text(
+            encoding="utf-8-sig"
+        ).splitlines(keepends=True)
+
+    def is_vst_line(self, line):
+        return bool(re.match(
+            r"^\s*(#\s*)?VSTPlugin\s*:",
+            line, re.IGNORECASE
+        ))
+
+    def is_enabled(self, line):
+        return bool(re.match(
+            r"^\s*VSTPlugin\s*:",
+            line, re.IGNORECASE
+        ))
+
+    def plugin_name(self, line):
+        match = re.search(
+            r"([A-Za-z0-9_-]+\.dll)",
+            line, re.IGNORECASE
+        )
+        return match.group(1) if match else "Plugin VST"
+
+    def select_file(self):
+        filename = filedialog.askopenfilename(
+            title="Selecione o arquivo do Equalizer APO",
+            filetypes=[
+                ("Configurações", "*.txt"),
+                ("Todos os arquivos", "*.*")
+            ]
+        )
+
+        if not filename:
+            return
+
+        self.config_path = Path(filename)
+        self.path_label.config(text=str(self.config_path))
+        self.global_button.config(state="normal")
+        self.refresh_plugins()
+
+    def make_backup(self):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        backup = self.config_path.with_name(
+            self.config_path.name + ".santix_" + timestamp + ".bak"
+        )
+        shutil.copy2(self.config_path, backup)
+
+    def save_lines(self, lines):
+        self.make_backup()
+        self.config_path.write_text(
+            "".join(lines),
+            encoding="utf-8"
+        )
+
+    def refresh_plugins(self):
+        for widget in self.plugins_frame.winfo_children():
+            widget.destroy()
+
         try:
-            self.original_text=self.config_path.read_text(encoding="utf-8-sig")
-        except UnicodeDecodeError:
-            self.original_text=self.config_path.read_text(encoding="cp1252")
-        self.enabled=not any(line.startswith("# SANTIX_BYPASS ") for line in self.original_text.splitlines())
-        self.status.config(text=f"Config: {self.config_path}")
-        messagebox.showinfo(APP_NAME,"Configuração carregada. Nenhuma alteração foi feita.")
-        self.show_section("Home")
-
-    def toggle(self):
-        if not self.config_path:
-            messagebox.showwarning(APP_NAME,"Selecione primeiro o config.txt do Equalizer APO.")
+            lines = self.read_lines()
+        except Exception as error:
+            messagebox.showerror("Erro", str(error))
             return
-        current=self.config_path.read_text(encoding="utf-8-sig")
-        if self.enabled:
-            backup=self.config_path.with_name(self.config_path.name+".santix-backup")
-            if not backup.exists(): shutil.copy2(self.config_path,backup)
-            lines=current.splitlines()
-            changed=[]
-            for line in lines:
-                if line.strip() and not line.lstrip().startswith("#"):
-                    changed.append("# SANTIX_BYPASS "+line)
+
+        plugins = [
+            (index, line)
+            for index, line in enumerate(lines)
+            if self.is_vst_line(line)
+        ]
+
+        if not plugins:
+            tk.Label(
+                self.plugins_frame,
+                text="Nenhum plugin VST encontrado.",
+                fg="white", bg="#10131c"
+            ).pack()
+            self.status.config(text="Nenhum VST encontrado")
+            return
+
+        counts = {}
+
+        for index, line in plugins:
+            name = self.plugin_name(line)
+            counts[name] = counts.get(name, 0) + 1
+
+            label = name
+
+            if name.lower() == "basiq.dll":
+                occurrence = counts[name]
+                if occurrence == 1:
+                    label = "basiQ - Nice Vocal"
+                elif occurrence == 2:
+                    label = "basiQ - Crystal Guitar Face"
                 else:
-                    changed.append(line)
-            self.config_path.write_text("\n".join(changed)+("\n" if current.endswith("\n") else ""),encoding="utf-8")
-            self.enabled=False
+                    label = f"basiQ - Instância {occurrence}"
+
+            variable = tk.BooleanVar(
+                value=self.is_enabled(line)
+            )
+
+            row = tk.Frame(
+                self.plugins_frame,
+                bg="#202737", padx=12, pady=9
+            )
+            row.pack(fill="x", pady=5)
+
+            tk.Label(
+                row, text=label,
+                fg="white", bg="#202737",
+                font=("Segoe UI", 11, "bold")
+            ).pack(side="left")
+
+            tk.Checkbutton(
+                row, text="Ativo",
+                variable=variable,
+                command=lambda i=index, v=variable:
+                    self.toggle_plugin(i, v),
+                fg="#62d9ff", bg="#202737",
+                selectcolor="#10131c",
+                activebackground="#202737",
+                activeforeground="white"
+            ).pack(side="right")
+
+        active = sum(
+            1 for _, line in plugins
+            if self.is_enabled(line)
+        )
+
+        self.status.config(
+            text=f"{active} de {len(plugins)} plugins ativos"
+        )
+
+    def change_plugin(self, index, enabled):
+        lines = self.read_lines()
+
+        if index >= len(lines) or not self.is_vst_line(lines[index]):
+            raise ValueError(
+                "O arquivo mudou. Selecione-o novamente."
+            )
+
+        line = lines[index]
+
+        if enabled:
+            line = re.sub(
+                r"^(\s*)#\s*",
+                r"\1",
+                line,
+                count=1
+            )
         else:
-            backup=self.config_path.with_name(self.config_path.name+".santix-backup")
-            if backup.exists():
-                # Restore exact original backup, including formatting.
-                shutil.copy2(backup,self.config_path)
-            else:
-                lines=current.splitlines()
-                restored=[line[len("# SANTIX_BYPASS "):] if line.startswith("# SANTIX_BYPASS ") else line for line in lines]
-                self.config_path.write_text("\n".join(restored)+"\n",encoding="utf-8")
-            self.enabled=True
-        self.original_text=self.config_path.read_text(encoding="utf-8-sig")
-        self.toggle_btn.config(text="EFEITOS: ON" if self.enabled else "EFEITOS: OFF",
-                               bg=self.red if self.enabled else "#555a64")
-        messagebox.showinfo(APP_NAME,"Estado alterado. Se o Equalizer APO não atualizar automaticamente, reinicie o áudio/aplicativo que usa o microfone.")
+            if self.is_enabled(line):
+                line = re.sub(
+                    r"^(\s*)",
+                    r"\1# ",
+                    line,
+                    count=1
+                )
 
-    def show_vsts(self):
+        lines[index] = line
+        return lines
+
+    def toggle_plugin(self, index, variable):
+        try:
+            lines = self.change_plugin(
+                index, variable.get()
+            )
+            self.save_lines(lines)
+            self.refresh_plugins()
+        except Exception as error:
+            messagebox.showerror("Erro", str(error))
+            self.refresh_plugins()
+
+    def toggle_all(self):
         if not self.config_path:
-            messagebox.showinfo(APP_NAME,"Selecione primeiro seu config.txt.")
             return
-        text=self.config_path.read_text(encoding="utf-8-sig",errors="replace")
-        found=[x.strip() for x in text.splitlines() if "VSTPlugin:" in x]
-        msg="\n".join(found) if found else "Nenhuma linha VSTPlugin encontrada."
-        messagebox.showinfo("Plugins encontrados",msg)
 
-if __name__=="__main__":
-    root=tk.Tk()
-    app=SantixApp(root)
+        try:
+            lines = self.read_lines()
+
+            vst_indices = [
+                i for i, line in enumerate(lines)
+                if self.is_vst_line(line)
+            ]
+
+            if not vst_indices:
+                messagebox.showinfo(
+                    "Santix", "Nenhum VST encontrado."
+                )
+                return
+
+            any_disabled = any(
+                not self.is_enabled(lines[i])
+                for i in vst_indices
+            )
+
+            enable_all = any_disabled
+
+            for i in vst_indices:
+                line = lines[i]
+
+                if enable_all:
+                    line = re.sub(
+                        r"^(\s*)#\s*",
+                        r"\1",
+                        line,
+                        count=1
+                    )
+                else:
+                    if self.is_enabled(line):
+                        line = re.sub(
+                            r"^(\s*)",
+                            r"\1# ",
+                            line,
+                            count=1
+                        )
+
+                lines[i] = line
+
+            self.save_lines(lines)
+            self.refresh_plugins()
+
+            messagebox.showinfo(
+                "Santix Martinez",
+                "Todos os VSTs foram " +
+                ("ativados." if enable_all else "desativados.")
+            )
+
+        except Exception as error:
+            messagebox.showerror("Erro", str(error))
+            self.refresh_plugins()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = SantixMartinez(root)
     root.mainloop()
+            
