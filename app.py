@@ -1,187 +1,403 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+import sys
+import re
+import shutil
+import threading
 from pathlib import Path
 from datetime import datetime
-import shutil
-import re
-import threading
 
 import numpy as np
 import sounddevice as sd
 
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout,
+    QHBoxLayout, QLabel, QPushButton, QComboBox,
+    QSlider, QProgressBar, QFileDialog, QMessageBox,
+    QStackedWidget, QFrame, QCheckBox
+)
 
-class SantixMartinez:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Santix Martinez")
-        self.root.geometry("760x820")
-        self.root.configure(bg="#10131c")
+
+class SantixMartinez(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Santix Martinez")
+        self.resize(1100, 760)
 
         self.config_path = None
         self.stream = None
         self.running = False
-        self.peak = 0.0
-        self.rms = 0.0
-        self.gain = 1.0
-        self.lock = threading.Lock()
         self.devices = {}
+        self.gain = 1.0
+        self.peak = 0.0
+        self.lock = threading.Lock()
 
-        self.build_interface()
+        self.setStyleSheet("""
+            QMainWindow, QWidget {
+                background-color: #101015;
+                color: #eeeeee;
+                font-family: Segoe UI;
+            }
+            QFrame#sidebar {
+                background-color: #08080c;
+                border-right: 1px solid #302027;
+            }
+            QPushButton {
+                background-color: #211519;
+                color: #eeeeee;
+                border: 1px solid #47252d;
+                border-radius: 6px;
+                padding: 11px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #49232b;
+            }
+            QPushButton#primary {
+                background-color: #a83242;
+                font-weight: bold;
+            }
+            QPushButton#primary:hover {
+                background-color: #c74355;
+            }
+            QComboBox {
+                background-color: #211519;
+                border: 1px solid #63303a;
+                padding: 9px;
+                border-radius: 5px;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #39242a;
+            }
+            QSlider::handle:horizontal {
+                background: #e45b69;
+                width: 15px;
+                margin: -5px 0;
+                border-radius: 5px;
+            }
+            QProgressBar {
+                background: #292329;
+                border: none;
+                height: 13px;
+                border-radius: 5px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background: #db5361;
+                border-radius: 5px;
+            }
+        """)
+
+        self.build_ui()
         self.refresh_devices()
-        self.update_meter()
 
-        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_meter)
+        self.timer.start(50)
 
-    def build_interface(self):
-        tk.Label(
-            self.root, text="𝐒antix 𝐌artinez",
-            font=("Segoe UI", 27, "bold"),
-            fg="#62d9ff", bg="#10131c"
-        ).pack(pady=(15, 3))
+    def build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
 
-        tk.Label(
-            self.root, text="PRO AUDIO CONTROL SYSTEM",
-            fg="#aab4c8", bg="#10131c"
-        ).pack()
+        main = QHBoxLayout(central)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
 
-        self.status = tk.Label(
-            self.root, text="Sistema parado",
-            fg="#f5c96a", bg="#10131c"
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(205)
+
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(12, 20, 12, 15)
+
+        logo = QLabel("𝐒ANTIX\nMARTINEZ")
+        logo.setStyleSheet(
+            "color:#e45b69;font-size:23px;font-weight:bold;"
         )
-        self.status.pack(pady=12)
+        side.addWidget(logo)
 
-        self.section("ENTRADA E SAÍDA DE ÁUDIO")
+        side.addSpacing(25)
 
-        self.input_box = self.device_box("Microfone de entrada")
-        self.output_box = self.device_box("Saída virtual")
+        self.pages = QStackedWidget()
 
-        tk.Button(
-            self.root, text="ATUALIZAR DISPOSITIVOS",
-            command=self.refresh_devices,
-            bg="#303b50", fg="white",
-            relief="flat", padx=12, pady=7
-        ).pack(pady=8)
+        page_names = [
+            "Home", "Loading", "Audio", "VST Host",
+            "Effects", "Custom RPC", "Sounds", "Themes"
+        ]
 
-        self.rate_box = self.device_box("Frequência de áudio", False)
-        self.rate_box["values"] = ["48000", "44100"]
-        self.rate_box.set("48000")
+        for index, name in enumerate(page_names):
+            button = QPushButton(name)
+            button.clicked.connect(
+                lambda checked=False, i=index:
+                self.pages.setCurrentIndex(i)
+            )
+            side.addWidget(button)
 
-        self.section("PROCESSAMENTO DE ÁUDIO")
+        side.addStretch()
 
-        tk.Label(
-            self.root, text="Ganho de entrada",
-            fg="white", bg="#10131c"
-        ).pack()
+        version = QLabel("WINDOWS 11 • 64 BIT")
+        version.setStyleSheet("color:#777777;font-size:10px;")
+        side.addWidget(version)
 
-        self.gain_label = tk.Label(
-            self.root, text="100%",
-            fg="#62d9ff", bg="#10131c"
+        main.addWidget(sidebar)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(28, 25, 28, 25)
+
+        self.pages = QStackedWidget()
+
+        self.pages.addWidget(self.home_page())
+        self.pages.addWidget(self.loading_page())
+        self.pages.addWidget(self.audio_page())
+        self.pages.addWidget(self.vst_page())
+        self.pages.addWidget(self.effects_page())
+        self.pages.addWidget(self.rpc_page())
+        self.pages.addWidget(self.sounds_page())
+        self.pages.addWidget(self.themes_page())
+
+        content_layout.addWidget(self.pages)
+        main.addWidget(content)
+
+    def heading(self, title, subtitle=""):
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 15)
+
+        label = QLabel(title)
+        label.setStyleSheet(
+            "font-size:25px;font-weight:bold;color:#e45b69;"
         )
-        self.gain_label.pack()
+        layout.addWidget(label)
 
-        self.gain_slider = tk.Scale(
-            self.root, from_=0, to=200,
-            orient="horizontal", length=350,
-            command=self.set_gain,
-            bg="#10131c", fg="white",
-            highlightthickness=0,
-            troughcolor="#303b50"
-        )
-        self.gain_slider.set(100)
-        self.gain_slider.pack()
-
-        self.section("MEDIDOR DE MICROFONE")
-
-        self.level_label = tk.Label(
-            self.root, text="Nível: 0%",
-            fg="#62d9ff", bg="#10131c",
-            font=("Segoe UI", 13, "bold")
-        )
-        self.level_label.pack(pady=5)
-
-        self.meter = ttk.Progressbar(
-            self.root, length=430,
-            maximum=100, mode="determinate"
-        )
-        self.meter.pack(pady=5)
-
-        buttons = tk.Frame(self.root, bg="#10131c")
-        buttons.pack(pady=15)
-
-        self.start_button = tk.Button(
-            buttons, text="INICIAR ÁUDIO",
-            command=self.start_audio,
-            bg="#087d58", fg="white",
-            font=("Segoe UI", 11, "bold"),
-            padx=18, pady=12, relief="flat"
-        )
-        self.start_button.pack(side="left", padx=6)
-
-        self.stop_button = tk.Button(
-            buttons, text="PARAR ÁUDIO",
-            command=self.stop_audio,
-            bg="#a83242", fg="white",
-            font=("Segoe UI", 11, "bold"),
-            padx=18, pady=12, relief="flat",
-            state="disabled"
-        )
-        self.stop_button.pack(side="left", padx=6)
-
-        self.section("EQUALIZER APO E PLUGINS VST")
-
-        tk.Button(
-            self.root, text="SELECIONAR CONFIG.TXT",
-            command=self.select_config,
-            bg="#168ac4", fg="white",
-            relief="flat", padx=12, pady=8
-        ).pack(pady=5)
-
-        self.config_label = tk.Label(
-            self.root, text="Nenhum arquivo selecionado",
-            fg="#aab4c8", bg="#10131c",
-            wraplength=650
-        )
-        self.config_label.pack(pady=5)
-
-        self.global_button = tk.Button(
-            self.root, text="ATIVAR / DESATIVAR TODOS OS VST",
-            command=self.toggle_all,
-            bg="#303b50", fg="white",
-            relief="flat", padx=12, pady=8,
-            state="disabled"
-        )
-        self.global_button.pack(pady=7)
-
-        self.plugins_frame = tk.Frame(
-            self.root, bg="#10131c"
-        )
-        self.plugins_frame.pack(fill="x", padx=25)
-
-        tk.Label(
-            self.root,
-            text="Santix Martinez | Windows 64 bits",
-            fg="#8994a9", bg="#10131c"
-        ).pack(pady=12)
-
-    def section(self, title):
-        tk.Label(
-            self.root, text=title,
-            fg="#62d9ff", bg="#10131c",
-            font=("Segoe UI", 11, "bold")
-        ).pack(pady=(15, 8))
-
-    def device_box(self, label, device=True):
-        tk.Label(
-            self.root, text=label,
-            fg="white", bg="#10131c"
-        ).pack(pady=(5, 2))
-
-        box = ttk.Combobox(
-            self.root, state="readonly", width=65
-        )
-        box.pack(pady=3)
+        if subtitle:
+            sub = QLabel(subtitle)
+            sub.setStyleSheet("color:#999999;font-size:12px;")
+            layout.addWidget(sub)
 
         return box
+
+    def panel(self, title):
+        frame = QFrame()
+        frame.setStyleSheet("""
+            QFrame {
+                background-color: #19151a;
+                border: 1px solid #38232a;
+                border-radius: 9px;
+            }
+        """)
+        layout = QVBoxLayout(frame)
+        label = QLabel(title)
+        label.setStyleSheet(
+            "font-size:15px;font-weight:bold;color:#e45b69;"
+            "border:none;"
+        )
+        layout.addWidget(label)
+        return frame, layout
+
+    def home_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        layout.addWidget(self.heading(
+            "Santix Martinez",
+            "Professional Audio Control System"
+        ))
+
+        frame, box = self.panel("STATUS DO SISTEMA")
+        self.home_status = QLabel("Motor de áudio parado")
+        box.addWidget(self.home_status)
+
+        self.home_input = QLabel("Entrada: não selecionada")
+        box.addWidget(self.home_input)
+
+        self.home_output = QLabel("Saída: não selecionada")
+        box.addWidget(self.home_output)
+
+        layout.addWidget(frame)
+        layout.addStretch()
+        return page
+
+    def loading_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.heading(
+            "Loading",
+            "Inicialização e estado do motor de áudio"
+        ))
+
+        frame, box = self.panel("MOTOR DE ÁUDIO")
+        self.loading_status = QLabel("Aguardando inicialização")
+        box.addWidget(self.loading_status)
+        layout.addWidget(frame)
+        layout.addStretch()
+        return page
+
+    def audio_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        layout.addWidget(self.heading(
+            "Audio",
+            "Microfone, dispositivos e transmissão em tempo real"
+        ))
+
+        frame, box = self.panel("DISPOSITIVOS")
+
+        box.addWidget(QLabel("Microfone de entrada"))
+        self.input_box = QComboBox()
+        box.addWidget(self.input_box)
+
+        box.addWidget(QLabel("Saída virtual"))
+        self.output_box = QComboBox()
+        box.addWidget(self.output_box)
+
+        refresh = QPushButton("Atualizar dispositivos")
+        refresh.clicked.connect(self.refresh_devices)
+        box.addWidget(refresh)
+
+        layout.addWidget(frame)
+
+        meter_frame, meter_box = self.panel("MONITORAMENTO")
+        self.level_label = QLabel("Pico de entrada: 0%")
+        meter_box.addWidget(self.level_label)
+
+        self.meter = QProgressBar()
+        self.meter.setRange(0, 100)
+        self.meter.setValue(0)
+        meter_box.addWidget(self.meter)
+
+        layout.addWidget(meter_frame)
+
+        gain_frame, gain_box = self.panel("GANHO")
+        self.gain_label = QLabel("Ganho: 100%")
+        gain_box.addWidget(self.gain_label)
+
+        self.gain_slider = QSlider(Qt.Horizontal)
+        self.gain_slider.setRange(0, 200)
+        self.gain_slider.setValue(100)
+        self.gain_slider.valueChanged.connect(self.set_gain)
+        gain_box.addWidget(self.gain_slider)
+
+        layout.addWidget(gain_frame)
+
+        buttons = QHBoxLayout()
+
+        start = QPushButton("INICIAR ÁUDIO")
+        start.setObjectName("primary")
+        start.clicked.connect(self.start_audio)
+
+        stop = QPushButton("PARAR ÁUDIO")
+        stop.clicked.connect(self.stop_audio)
+
+        buttons.addWidget(start)
+        buttons.addWidget(stop)
+
+        layout.addLayout(buttons)
+        layout.addStretch()
+        return page
+
+    def vst_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        layout.addWidget(self.heading(
+            "VST Host",
+            "Controles das linhas VST no Equalizer APO"
+        ))
+
+        select = QPushButton("Selecionar config.txt")
+        select.clicked.connect(self.select_config)
+        layout.addWidget(select)
+
+        self.config_label = QLabel("Nenhum arquivo selecionado")
+        self.config_label.setWordWrap(True)
+        layout.addWidget(self.config_label)
+
+        self.vst_controls = QVBoxLayout()
+        layout.addLayout(self.vst_controls)
+
+        layout.addStretch()
+        return page
+
+    def effects_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.heading(
+            "Effects",
+            "Área de processamento de voz"
+        ))
+
+        frame, box = self.panel("PROCESSAMENTO")
+        box.addWidget(QLabel(
+            "O motor atual possui controle de ganho."
+        ))
+        box.addWidget(QLabel(
+            "Equalizador, compressor, limiter e redução "
+            "de ruído serão adicionados nas próximas etapas."
+        ))
+        layout.addWidget(frame)
+        layout.addStretch()
+        return page
+
+    def rpc_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.heading(
+            "Custom RPC",
+            "Integração de status com aplicativos"
+        ))
+
+        frame, box = self.panel("INTEGRAÇÕES")
+        box.addWidget(QLabel(
+            "Integração Discord Rich Presence ainda não configurada."
+        ))
+        layout.addWidget(frame)
+        layout.addStretch()
+        return page
+
+    def sounds_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.heading(
+            "Sounds",
+            "Central de efeitos sonoros"
+        ))
+
+        frame, box = self.panel("SOUNDBOARD")
+        box.addWidget(QLabel(
+            "A soundboard será implementada na próxima etapa."
+        ))
+        layout.addWidget(frame)
+        layout.addStretch()
+        return page
+
+    def themes_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.heading(
+            "Themes",
+            "Personalização visual"
+        ))
+
+        frame, box = self.panel("TEMA")
+        box.addWidget(QLabel("Tema atual: Dark Red"))
+
+        button = QPushButton("Dark Red")
+        button.clicked.connect(
+            lambda: self.set_theme("#101015", "#e45b69")
+        )
+        box.addWidget(button)
+
+        layout.addWidget(frame)
+        layout.addStretch()
+        return page
+
+    def set_theme(self, background, accent):
+        self.setStyleSheet(self.styleSheet().replace(
+            "#e45b69", accent
+        ))
 
     def refresh_devices(self):
         try:
@@ -200,44 +416,35 @@ class SantixMartinez:
                 if device["max_output_channels"] > 0:
                     outputs.append(label)
 
-            self.input_box["values"] = inputs
-            self.output_box["values"] = outputs
+            self.input_box.clear()
+            self.output_box.clear()
+            self.input_box.addItems(inputs)
+            self.output_box.addItems(outputs)
 
-            m7 = next(
-                (x for x in inputs if "M7" in x.upper()),
-                inputs[0] if inputs else ""
-            )
+            for i, name in enumerate(inputs):
+                if "M7" in name.upper():
+                    self.input_box.setCurrentIndex(i)
+                    break
 
-            cable = next(
-                (x for x in outputs
-                 if "CABLE INPUT" in x.upper()),
-                outputs[0] if outputs else ""
-            )
-
-            self.input_box.set(m7)
-            self.output_box.set(cable)
-
-            self.status.config(
-                text="Dispositivos de áudio identificados",
-                fg="#62d9ff"
-            )
+            for i, name in enumerate(outputs):
+                if "CABLE INPUT" in name.upper():
+                    self.output_box.setCurrentIndex(i)
+                    break
 
         except Exception as error:
-            messagebox.showerror("Áudio", str(error))
+            QMessageBox.critical(self, "Áudio", str(error))
 
     def set_gain(self, value):
-        self.gain = float(value) / 100
-        self.gain_label.config(text=f"{int(float(value))}%")
+        self.gain = value / 100.0
+        self.gain_label.setText(f"Ganho: {value}%")
 
     def audio_callback(self, indata, outdata, frames, time, status):
         audio = indata[:, 0].copy()
 
         peak = float(np.max(np.abs(audio)))
-        rms = float(np.sqrt(np.mean(audio * audio)))
 
         with self.lock:
             self.peak = peak
-            self.rms = rms
 
         outdata[:, 0] = np.clip(
             audio * self.gain, -1.0, 1.0
@@ -248,43 +455,36 @@ class SantixMartinez:
             return
 
         try:
-            input_label = self.input_box.get()
-            output_label = self.output_box.get()
+            input_label = self.input_box.currentText()
+            output_label = self.output_box.currentText()
 
             if input_label not in self.devices:
-                raise ValueError("Selecione o microfone M7.")
+                raise ValueError("Selecione o microfone.")
 
             if output_label not in self.devices:
                 raise ValueError("Selecione a saída virtual.")
 
             input_id = self.devices[input_label]
             output_id = self.devices[output_label]
-            rate = int(self.rate_box.get())
 
             self.stream = sd.Stream(
                 device=(input_id, output_id),
-                samplerate=rate,
+                samplerate=48000,
                 channels=(1, 1),
                 dtype="float32",
-                callback=self.audio_callback,
-                blocksize=0
+                callback=self.audio_callback
             )
 
             self.stream.start()
             self.running = True
 
-            self.status.config(
-                text="ÁUDIO EM TEMPO REAL ATIVO",
-                fg="#42df91"
-            )
-            self.start_button.config(state="disabled")
-            self.stop_button.config(state="normal")
+            self.home_status.setText("Áudio em tempo real ativo")
+            self.loading_status.setText("Motor iniciado")
 
         except Exception as error:
             self.stream = None
-            messagebox.showerror(
-                "Não foi possível iniciar",
-                f"{error}\n\nSe necessário, tente 44100 Hz."
+            QMessageBox.critical(
+                self, "Erro ao iniciar áudio", str(error)
             )
 
     def stop_audio(self):
@@ -297,41 +497,35 @@ class SantixMartinez:
 
         self.stream = None
         self.running = False
-
-        self.status.config(
-            text="Sistema parado", fg="#f5c96a"
-        )
-        self.start_button.config(state="normal")
-        self.stop_button.config(state="disabled")
-        self.meter["value"] = 0
-        self.level_label.config(text="Nível: 0%")
+        self.home_status.setText("Motor de áudio parado")
+        self.loading_status.setText("Aguardando inicialização")
 
     def update_meter(self):
+        if not hasattr(self, "meter"):
+            return
+
         if self.running:
             with self.lock:
                 peak = self.peak
 
-            percent = min(100, int(peak * 100))
-            self.meter["value"] = percent
-            self.level_label.config(
-                text=f"Pico de entrada: {percent}%"
+            value = min(100, int(peak * 100))
+            self.meter.setValue(value)
+            self.level_label.setText(
+                f"Pico de entrada: {value}%"
             )
 
-        self.root.after(50, self.update_meter)
-
     def select_config(self):
-        filename = filedialog.askopenfilename(
-            filetypes=[
-                ("Configuração", "*.txt"),
-                ("Todos os arquivos", "*.*")
-            ]
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Selecionar Equalizer APO config.txt",
+            "",
+            "Arquivos TXT (*.txt);;Todos os arquivos (*)"
         )
 
         if filename:
             self.config_path = Path(filename)
-            self.config_label.config(text=str(self.config_path))
-            self.global_button.config(state="normal")
-            self.refresh_plugins()
+            self.config_label.setText(filename)
+            self.load_vsts()
 
     def is_vst(self, line):
         return bool(re.match(
@@ -345,169 +539,105 @@ class SantixMartinez:
             line, re.IGNORECASE
         ))
 
-    def plugin_name(self, line):
-        match = re.search(
-            r"([A-Za-z0-9_-]+\.dll)",
-            line, re.IGNORECASE
-        )
-        return match.group(1) if match else "Plugin VST"
-
-    def backup(self):
+    def backup_config(self):
         timestamp = datetime.now().strftime(
             "%Y%m%d_%H%M%S_%f"
         )
-        destination = self.config_path.with_name(
-            self.config_path.name + ".santix_" +
+
+        backup = self.config_path.with_name(
+            self.config_path.name + "." +
             timestamp + ".bak"
         )
-        shutil.copy2(self.config_path, destination)
 
-    def refresh_plugins(self):
-        for widget in self.plugins_frame.winfo_children():
-            widget.destroy()
+        shutil.copy2(self.config_path, backup)
+
+    def load_vsts(self):
+        while self.vst_controls.count():
+            item = self.vst_controls.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
         lines = self.config_path.read_text(
             encoding="utf-8-sig"
         ).splitlines(keepends=True)
 
-        self.plugin_indices = [
+        self.vst_indices = [
             i for i, line in enumerate(lines)
             if self.is_vst(line)
         ]
 
-        counts = {}
-
-        for index in self.plugin_indices:
+        for index in self.vst_indices:
             line = lines[index]
-            name = self.plugin_name(line)
-            counts[name] = counts.get(name, 0) + 1
 
-            label = name
-
-            if name.lower() == "basiq.dll":
-                label = (
-                    "basiQ - Nice Vocal"
-                    if counts[name] == 1
-                    else "basiQ - Crystal Guitar Face"
-                    if counts[name] == 2
-                    else f"basiQ - Instância {counts[name]}"
-                )
-
-            variable = tk.BooleanVar(
-                value=self.is_enabled(line)
+            match = re.search(
+                r"([A-Za-z0-9_-]+\.dll)",
+                line, re.IGNORECASE
             )
 
-            row = tk.Frame(
-                self.plugins_frame,
-                bg="#202737", padx=10, pady=7
-            )
-            row.pack(fill="x", pady=3)
+            name = match.group(1) if match else "Plugin VST"
 
-            tk.Label(
-                row, text=label,
-                fg="white", bg="#202737"
-            ).pack(side="left")
-
-            tk.Checkbutton(
-                row, text="Ativo",
-                variable=variable,
-                command=lambda i=index, v=variable:
-                    self.toggle_plugin(i, v),
-                fg="#62d9ff", bg="#202737",
-                selectcolor="#10131c",
-                activebackground="#202737"
-            ).pack(side="right")
-
-    def change_plugin(self, index, enabled):
-        lines = self.config_path.read_text(
-            encoding="utf-8-sig"
-        ).splitlines(keepends=True)
-
-        if index >= len(lines) or not self.is_vst(lines[index]):
-            raise ValueError(
-                "O arquivo mudou. Selecione-o novamente."
+            check = QCheckBox(name)
+            check.setChecked(self.is_enabled(line))
+            check.stateChanged.connect(
+                lambda state, i=index:
+                self.toggle_vst(i, state == Qt.Checked)
             )
 
-        line = lines[index]
+            self.vst_controls.addWidget(check)
 
-        if enabled:
-            line = re.sub(
-                r"^(\s*)#\s*", r"\1", line, count=1
-            )
-        elif self.is_enabled(line):
-            line = re.sub(
-                r"^(\s*)", r"\1# ", line, count=1
+        if not self.vst_indices:
+            self.vst_controls.addWidget(
+                QLabel("Nenhuma linha VST encontrada.")
             )
 
-        lines[index] = line
-
-        self.backup()
-        self.config_path.write_text(
-            "".join(lines), encoding="utf-8"
-        )
-
-    def toggle_plugin(self, index, variable):
-        try:
-            self.change_plugin(index, variable.get())
-            self.refresh_plugins()
-        except Exception as error:
-            messagebox.showerror("VST", str(error))
-            self.refresh_plugins()
-
-    def toggle_all(self):
+    def toggle_vst(self, index, enabled):
         try:
             lines = self.config_path.read_text(
                 encoding="utf-8-sig"
             ).splitlines(keepends=True)
 
-            indices = [
-                i for i, line in enumerate(lines)
-                if self.is_vst(line)
-            ]
+            if index >= len(lines) or not self.is_vst(lines[index]):
+                raise ValueError("O arquivo foi alterado externamente.")
 
-            if not indices:
-                messagebox.showinfo(
-                    "VST", "Nenhum plugin encontrado."
+            line = lines[index]
+
+            if enabled:
+                line = re.sub(
+                    r"^(\s*)#\s*", r"\1",
+                    line, count=1
                 )
-                return
-
-            enable = any(
-                not self.is_enabled(lines[i])
-                for i in indices
-            )
-
-            for i in indices:
-                line = lines[i]
-
-                if enable:
-                    line = re.sub(
-                        r"^(\s*)#\s*", r"\1",
-                        line, count=1
-                    )
-                elif self.is_enabled(line):
+            else:
+                if self.is_enabled(line):
                     line = re.sub(
                         r"^(\s*)", r"\1# ",
                         line, count=1
                     )
 
-                lines[i] = line
+            lines[index] = line
 
-            self.backup()
+            self.backup_config()
             self.config_path.write_text(
                 "".join(lines), encoding="utf-8"
             )
-            self.refresh_plugins()
 
         except Exception as error:
-            messagebox.showerror("VST", str(error))
+            QMessageBox.critical(self, "VST", str(error))
+            self.load_vsts()
 
-    def close(self):
+    def closeEvent(self, event):
         self.stop_audio()
-        self.root.destroy()
+        event.accept()
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = SantixMartinez(root)
-    root.mainloop()
-    
+    app = QApplication(sys.argv)
+    window = SantixMartinez()
+    window.show()
+
+    timer = QTimer()
+    timer.timeout.connect(window.update_meter)
+    timer.start(50)
+
+    sys.exit(app.exec())
+        
