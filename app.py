@@ -1,3 +1,4 @@
+
 import sys
 import re
 import shutil
@@ -31,6 +32,24 @@ class SantixMartinez(QMainWindow):
         self.gain = 1.0
         self.peak = 0.0
         self.lock = threading.Lock()
+
+        # Processamento de áudio
+        self.eq_bass = 0.0
+        self.eq_mid = 0.0
+        self.eq_treble = 0.0
+
+        self.compressor_enabled = True
+        self.compressor_threshold = -18.0
+        self.compressor_ratio = 3.0
+
+        self.limiter_enabled = True
+        self.limiter_ceiling = -1.0
+
+        self.gate_enabled = False
+        self.gate_threshold = -50.0
+
+        self.low_state = 0.0
+        self.mid_state = 0.0
 
         self.setStyleSheet("""
             QMainWindow, QWidget {
@@ -104,6 +123,8 @@ class SantixMartinez(QMainWindow):
         main.setContentsMargins(0, 0, 0, 0)
         main.setSpacing(0)
 
+        self.pages = QStackedWidget()
+
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(205)
@@ -116,10 +137,7 @@ class SantixMartinez(QMainWindow):
             "color:#e45b69;font-size:23px;font-weight:bold;"
         )
         side.addWidget(logo)
-
         side.addSpacing(25)
-
-        self.pages = QStackedWidget()
 
         page_names = [
             "Home", "Loading", "Audio", "VST Host",
@@ -145,8 +163,6 @@ class SantixMartinez(QMainWindow):
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(28, 25, 28, 25)
-
-        self.pages = QStackedWidget()
 
         self.pages.addWidget(self.home_page())
         self.pages.addWidget(self.loading_page())
@@ -298,6 +314,117 @@ class SantixMartinez(QMainWindow):
         layout.addStretch()
         return page
 
+    def effects_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        layout.addWidget(self.heading(
+            "Effects",
+            "Equalizador e processamento de voz em tempo real"
+        ))
+
+        frame, box = self.panel("EQUALIZADOR — 3 BANDAS")
+
+        self.bass_label = QLabel("Graves: 0 dB")
+        box.addWidget(self.bass_label)
+        self.bass_slider = QSlider(Qt.Horizontal)
+        self.bass_slider.setRange(-12, 12)
+        self.bass_slider.setValue(0)
+        self.bass_slider.valueChanged.connect(
+            lambda v: self.set_eq("bass", v)
+        )
+        box.addWidget(self.bass_slider)
+
+        self.mid_label = QLabel("Médios: 0 dB")
+        box.addWidget(self.mid_label)
+        self.mid_slider = QSlider(Qt.Horizontal)
+        self.mid_slider.setRange(-12, 12)
+        self.mid_slider.setValue(0)
+        self.mid_slider.valueChanged.connect(
+            lambda v: self.set_eq("mid", v)
+        )
+        box.addWidget(self.mid_slider)
+
+        self.treble_label = QLabel("Agudos: 0 dB")
+        box.addWidget(self.treble_label)
+        self.treble_slider = QSlider(Qt.Horizontal)
+        self.treble_slider.setRange(-12, 12)
+        self.treble_slider.setValue(0)
+        self.treble_slider.valueChanged.connect(
+            lambda v: self.set_eq("treble", v)
+        )
+        box.addWidget(self.treble_slider)
+
+        layout.addWidget(frame)
+
+        comp_frame, comp_box = self.panel("COMPRESSOR")
+        self.comp_check = QCheckBox("Ativar compressor")
+        self.comp_check.setChecked(True)
+        self.comp_check.stateChanged.connect(
+            lambda state: setattr(
+                self, "compressor_enabled", state == Qt.Checked
+            )
+        )
+        comp_box.addWidget(self.comp_check)
+
+        self.comp_label = QLabel("Threshold: -18 dB")
+        comp_box.addWidget(self.comp_label)
+        self.comp_slider = QSlider(Qt.Horizontal)
+        self.comp_slider.setRange(-40, 0)
+        self.comp_slider.setValue(-18)
+        self.comp_slider.valueChanged.connect(
+            self.set_compressor_threshold
+        )
+        comp_box.addWidget(self.comp_slider)
+
+        layout.addWidget(comp_frame)
+
+        limiter_frame, limiter_box = self.panel("LIMITER")
+        self.limiter_check = QCheckBox("Ativar limiter")
+        self.limiter_check.setChecked(True)
+        self.limiter_check.stateChanged.connect(
+            lambda state: setattr(
+                self, "limiter_enabled", state == Qt.Checked
+            )
+        )
+        limiter_box.addWidget(self.limiter_check)
+
+        self.limiter_label = QLabel("Limite: -1 dB")
+        limiter_box.addWidget(self.limiter_label)
+        self.limiter_slider = QSlider(Qt.Horizontal)
+        self.limiter_slider.setRange(-12, 0)
+        self.limiter_slider.setValue(-1)
+        self.limiter_slider.valueChanged.connect(
+            self.set_limiter_ceiling
+        )
+        limiter_box.addWidget(self.limiter_slider)
+
+        layout.addWidget(limiter_frame)
+
+        gate_frame, gate_box = self.panel("NOISE GATE")
+        self.gate_check = QCheckBox("Ativar Noise Gate")
+        self.gate_check.setChecked(False)
+        self.gate_check.stateChanged.connect(
+            lambda state: setattr(
+                self, "gate_enabled", state == Qt.Checked
+            )
+        )
+        gate_box.addWidget(self.gate_check)
+
+        self.gate_label = QLabel("Sensibilidade: -50 dB")
+        gate_box.addWidget(self.gate_label)
+        self.gate_slider = QSlider(Qt.Horizontal)
+        self.gate_slider.setRange(-70, -20)
+        self.gate_slider.setValue(-50)
+        self.gate_slider.valueChanged.connect(
+            self.set_gate_threshold
+        )
+        gate_box.addWidget(self.gate_slider)
+
+        layout.addWidget(gate_frame)
+        layout.addStretch()
+        return page
+        
     def vst_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -318,26 +445,6 @@ class SantixMartinez(QMainWindow):
         self.vst_controls = QVBoxLayout()
         layout.addLayout(self.vst_controls)
 
-        layout.addStretch()
-        return page
-
-    def effects_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addWidget(self.heading(
-            "Effects",
-            "Área de processamento de voz"
-        ))
-
-        frame, box = self.panel("PROCESSAMENTO")
-        box.addWidget(QLabel(
-            "O motor atual possui controle de ganho."
-        ))
-        box.addWidget(QLabel(
-            "Equalizador, compressor, limiter e redução "
-            "de ruído serão adicionados nas próximas etapas."
-        ))
-        layout.addWidget(frame)
         layout.addStretch()
         return page
 
@@ -399,6 +506,29 @@ class SantixMartinez(QMainWindow):
             "#e45b69", accent
         ))
 
+    def set_eq(self, band, value):
+        if band == "bass":
+            self.eq_bass = value
+            self.bass_label.setText(f"Graves: {value} dB")
+        elif band == "mid":
+            self.eq_mid = value
+            self.mid_label.setText(f"Médios: {value} dB")
+        elif band == "treble":
+            self.eq_treble = value
+            self.treble_label.setText(f"Agudos: {value} dB")
+
+    def set_compressor_threshold(self, value):
+        self.compressor_threshold = float(value)
+        self.comp_label.setText(f"Threshold: {value} dB")
+
+    def set_limiter_ceiling(self, value):
+        self.limiter_ceiling = float(value)
+        self.limiter_label.setText(f"Limite: {value} dB")
+
+    def set_gate_threshold(self, value):
+        self.gate_threshold = float(value)
+        self.gate_label.setText(f"Sensibilidade: {value} dB")
+
     def refresh_devices(self):
         try:
             self.devices = {}
@@ -422,12 +552,12 @@ class SantixMartinez(QMainWindow):
             self.output_box.addItems(outputs)
 
             for i, name in enumerate(inputs):
-                if "M7" in name.upper():
+                if "MICROFONE (M7)" in name.upper():
                     self.input_box.setCurrentIndex(i)
                     break
 
             for i, name in enumerate(outputs):
-                if "CABLE INPUT" in name.upper():
+                if "VB-AUDIO POINT" in name.upper():
                     self.output_box.setCurrentIndex(i)
                     break
 
@@ -438,6 +568,76 @@ class SantixMartinez(QMainWindow):
         self.gain = value / 100.0
         self.gain_label.setText(f"Ganho: {value}%")
 
+    def process_audio(self, audio):
+        audio = audio.astype(np.float32, copy=True)
+
+        # Equalizador simples de três bandas
+        alpha_low = 1.0 - np.exp(
+            -2.0 * np.pi * 250.0 / 48000.0
+        )
+        alpha_high = 1.0 - np.exp(
+            -2.0 * np.pi * 3500.0 / 48000.0
+        )
+
+        low = np.empty_like(audio)
+        high = np.empty_like(audio)
+
+        low_state = self.low_state
+        high_state = self.mid_state
+
+        for i in range(len(audio)):
+            low_state += alpha_low * (audio[i] - low_state)
+            high_state += alpha_high * (audio[i] - high_state)
+            low[i] = low_state
+            high[i] = high_state
+
+        self.low_state = float(low_state)
+        self.mid_state = float(high_state)
+
+        mid = high - low
+        treble = audio - high
+
+        bass_gain = 10.0 ** (self.eq_bass / 20.0)
+        mid_gain = 10.0 ** (self.eq_mid / 20.0)
+        treble_gain = 10.0 ** (self.eq_treble / 20.0)
+
+        audio = (
+            low * bass_gain
+            + mid * mid_gain
+            + treble * treble_gain
+        )
+
+        # Noise Gate básico
+        rms = float(np.sqrt(np.mean(audio * audio) + 1e-12))
+        level_db = 20.0 * np.log10(max(rms, 1e-8))
+
+        if self.gate_enabled and level_db < self.gate_threshold:
+            audio *= 0.08
+
+        # Compressor básico
+        if self.compressor_enabled:
+            rms = float(np.sqrt(np.mean(audio * audio) + 1e-12))
+            level_db = 20.0 * np.log10(max(rms, 1e-8))
+
+            if level_db > self.compressor_threshold:
+                excess = level_db - self.compressor_threshold
+                reduction = excess * (
+                    1.0 - 1.0 / 3.0
+                )
+                audio *= 10.0 ** (-reduction / 20.0)
+
+        # Ganho principal
+        audio *= self.gain
+
+        # Limiter
+        if self.limiter_enabled:
+            ceiling = 10.0 ** (self.limiter_ceiling / 20.0)
+            audio = np.clip(audio, -ceiling, ceiling)
+        else:
+            audio = np.clip(audio, -1.0, 1.0)
+
+        return audio.astype(np.float32)
+
     def audio_callback(self, indata, outdata, frames, time, status):
         audio = indata[:, 0].copy()
 
@@ -446,9 +646,8 @@ class SantixMartinez(QMainWindow):
         with self.lock:
             self.peak = peak
 
-        outdata[:, 0] = np.clip(
-            audio * self.gain, -1.0, 1.0
-        )
+        processed = self.process_audio(audio)
+        outdata[:, 0] = processed
 
     def start_audio(self):
         if self.running:
@@ -479,6 +678,8 @@ class SantixMartinez(QMainWindow):
             self.running = True
 
             self.home_status.setText("Áudio em tempo real ativo")
+            self.home_input.setText(f"Entrada: {input_label}")
+            self.home_output.setText(f"Saída: {output_label}")
             self.loading_status.setText("Motor iniciado")
 
         except Exception as error:
@@ -557,6 +758,9 @@ class SantixMartinez(QMainWindow):
             widget = item.widget()
             if widget:
                 widget.deleteLater()
+
+        if not self.config_path:
+            return
 
         lines = self.config_path.read_text(
             encoding="utf-8-sig"
@@ -640,4 +844,4 @@ if __name__ == "__main__":
     timer.start(50)
 
     sys.exit(app.exec())
-        
+    
